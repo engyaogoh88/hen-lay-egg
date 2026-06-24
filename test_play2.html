@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Hen Lay Egg 🥚</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Comic Sans MS', cursive; background: linear-gradient(180deg, #87CEEB 0%, #98FB98 100%); overflow: hidden; }
+#gameCanvas { display: block; margin: 0 auto; }
+#ui { position: absolute; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 8px 16px; background: rgba(0,0,0,0.5); color: white; font-size: 16px; z-index: 10; }
+#ui .lives { font-size: 20px; }
+#ui .score { font-size: 18px; font-weight: bold; color: #FFD700; }
+#ui .level { font-size: 14px; color: #90EE90; }
+#ui .timer-bar { position: absolute; bottom: -4px; left: 0; right: 0; height: 4px; background: rgba(255,255,255,0.3); }
+#ui .timer-fill { height: 100%; background: linear-gradient(90deg, #FF6B6B, #FFD93D, #6BCB77); transition: width 0.1s linear; }
+#startScreen, #gameOverScreen, #levelScreen { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); z-index: 100; color: white; text-align: center; padding: 20px; }
+#startScreen h1 { font-size: 48px; color: #FFD700; margin-bottom: 10px; text-shadow: 3px 3px 0 #FF6B6B; }
+#startScreen p { font-size: 18px; margin: 5px 0; }
+.btn { margin-top: 20px; padding: 15px 40px; font-size: 24px; font-family: inherit; background: linear-gradient(135deg, #FF6B6B, #FF8E53); border: none; border-radius: 50px; color: white; cursor: pointer; box-shadow: 0 4px 15px rgba(255,107,107,0.4); }
+#gameOverScreen h2 { font-size: 36px; color: #FF6B6B; }
+#levelScreen h2 { font-size: 32px; color: #FFD700; }
+.hidden { display: none !important; }
+#controls { position: absolute; bottom: 10px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 20px; z-index: 50; }
+#controls button { width: 70px; height: 70px; border-radius: 50%; border: 3px solid white; background: rgba(255,255,255,0.3); color: white; font-size: 28px; cursor: pointer; }
+@media (min-width: 768px) { #controls { display: none; } }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="ui"></div>
+<div id="startScreen" class="hidden"></div>
+<div id="gameOverScreen" class="hidden"></div>
+<div id="levelScreen" class="hidden"></div>
+<div id="controls"></div>
+<script src="game.js"></script>
+<script>
+// Auto-start the game after page loads
+window.addEventListener('load', function() {
+  setTimeout(function() {
+    // Try to find and click the START button
+    var btn = document.querySelector('#startScreen .btn');
+    if (btn) {
+      btn.click();
+    }
+  }, 500);
+});
+</script>
+</body>
+</html>

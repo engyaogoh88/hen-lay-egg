@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hen Lay Egg 🥚</title>
+<style>
+* { margin: 0; padding: 0; }
+body { font-family: 'Comic Sans MS', cursive; background: linear-gradient(180deg, #87CEEB 0%, #98FB98 100%); overflow: hidden; }
+#gameCanvas { display: block; margin: 0 auto; }
+#startScreen { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); z-index: 100; color: white; }
+.hidden { display: none !important; }
+</style>
+<script src="game.js"></script>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<div id="startScreen" class="hidden"></div>
+<div id="ui"></div>
+<div id="gameOverScreen" class="hidden"></div>
+<div id="levelScreen" class="hidden"></div>
+<div id="controls"></div>
+</body>
+</html>

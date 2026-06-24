@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Test</title>
+<style>
+* { margin: 0; padding: 0; }
+body { background: linear-gradient(180deg, #87CEEB 0%, #98FB98 100%); }
+#gameCanvas { display: block; margin: 0 auto; }
+#startScreen {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.7);
+  z-index: 100;
+  color: white;
+  text-align: center;
+  padding: 20px;
+}
+#startScreen h1 { font-size: 48px; color: #FFD700; }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div id="startScreen" class="hidden">
+  <h1>🐔 Hen Lay Egg 🥚</h1>
+  <p>Test content</p>
+  <button onclick="alert('clicked')">🎮 START</button>
+</div>
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startScreen = document.getElementById('startScreen');
+
+// Draw background
+const grad = ctx.createLinearGradient(0, 0, 0, 600);
+grad.addColorStop(0, '#87CEEB');
+grad.addColorStop(1, '#98FB98');
+ctx.fillStyle = grad;
+ctx.fillRect(0, 0, 400, 600);
+
+// Show start screen
+startScreen.classList.remove('hidden');
+console.log('Start screen shown, classList:', startScreen.classList.toString());
+</script>
+</body>
+</html>
