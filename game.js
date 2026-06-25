@@ -89,13 +89,16 @@ const powerupEmoji = {
 
 function resize() {
   if (!canvas) return;
-  const isMobile = window.innerWidth < 768;
+  // Use visualViewport for accurate mobile sizing (excludes URL bar)
+  const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
+  const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const isMobile = vw < 768;
   if (isMobile) {
-    W = window.innerWidth;
-    H = window.innerHeight;
+    W = vw;
+    H = vh;
   } else {
-    W = Math.min(800, window.innerWidth);
-    H = Math.min(900, window.innerHeight);
+    W = Math.min(800, vw);
+    H = Math.min(900, vh);
   }
   SCALE = W / 400;
   canvas.width = W;
