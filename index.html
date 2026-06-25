@@ -84,6 +84,41 @@ html, body {
 .btn:active { transform: scale(0.95); }
 #gameOverScreen h2 { font-size: 36px; color: #FF6B6B; }
 #levelScreen h2 { font-size: 32px; color: #FFD700; }
+.level-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 360px;
+  margin: 12px auto;
+}
+.level-card {
+  border-radius: 12px;
+  padding: 12px 8px;
+  text-align: center;
+  font-size: 14px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+.level-card:active { transform: scale(0.95); }
+.level-card.unlocked {
+  background: rgba(255,255,255,0.2);
+  border: 2px solid rgba(255,255,255,0.4);
+}
+.level-card.locked {
+  background: rgba(0,0,0,0.3);
+  border: 2px solid rgba(100,100,100,0.4);
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.level-num { font-size: 24px; font-weight: bold; }
+.level-name { font-size: 11px; margin-top: 4px; opacity: 0.9; }
+.level-stars { font-size: 14px; margin-top: 2px; min-height: 18px; }
+@media (max-width: 380px) {
+  .level-grid { grid-template-columns: repeat(3, 1fr); gap: 6px; max-width: 300px; }
+  .level-card { padding: 8px 4px; }
+  .level-num { font-size: 20px; }
+  .level-name { font-size: 10px; }
+}
 .hidden { display: none !important; }
 #controls {
   position: absolute;
@@ -118,6 +153,24 @@ html, body {
 <div id="gameOverScreen" class="hidden"></div>
 <div id="levelScreen" class="hidden"></div>
 <div id="controls"></div>
+<script>
+// Polyfill for roundRect
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+  CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+    if (typeof r === 'number') r = [r,r,r,r];
+    this.moveTo(x+r[0], y);
+    this.lineTo(x+w-r[1], y);
+    this.quadraticCurveTo(x+w, y, x+w, y+r[1]);
+    this.lineTo(x+w, y+h-r[2]);
+    this.quadraticCurveTo(x+w, y+h, x+w-r[2], y+h);
+    this.lineTo(x+r[3], y+h);
+    this.quadraticCurveTo(x, y+h, x, y+h-r[3]);
+    this.lineTo(x, y+r[0]);
+    this.quadraticCurveTo(x, y, x+r[0], y);
+    this.closePath();
+  };
+}
+</script>
 <script src="game.js"></script>
 </body>
 </html>
