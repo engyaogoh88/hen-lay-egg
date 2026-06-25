@@ -493,12 +493,13 @@ function update(dt) {
     }
 
     // Bounce off obstacles
+    const eggLeft = egg.x - egg.width / 2;
+    const eggRight = egg.x + egg.width / 2;
+    const eggTop = egg.y - egg.height / 2;
+    const eggBottom = egg.y + egg.height / 2;
+    
     game.obstacles.forEach(obs => {
       if (obs.type === 'wind1' || obs.type === 'rain1') return;
-      const eggLeft = egg.x - egg.width / 2;
-      const eggRight = egg.x + egg.width / 2;
-      const eggTop = egg.y - egg.height / 2;
-      const eggBottom = egg.y + egg.height / 2;
       const obsLeft = obs.x - obs.width / 2;
       const obsRight = obs.x + obs.width / 2;
       const obsTop = obs.y - obs.height / 2;
