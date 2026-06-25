@@ -76,6 +76,10 @@ function startup() {
 
 // Safe startup - script is at end of body, DOM is ready
 startup();
+// Force an initial draw (requestAnimationFrame may be throttled in some contexts)
+setTimeout(function() { try { draw(); } catch(e) {} }, 50);
+setTimeout(function() { try { draw(); } catch(e) {} }, 200);
+setTimeout(function() { try { draw(); } catch(e) {} }, 500);
 
 const powerupEmoji = {
   golden: '🟡', speed: '⚡', shield: '🛡️', magnet: '🧲',
