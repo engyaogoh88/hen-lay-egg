@@ -96,8 +96,6 @@ function resize() {
   SCALE = W / 400;
   canvas.width = W;
   canvas.height = H;
-  canvas.style.width = W + 'px';
-  canvas.style.height = H + 'px';
 }
 window.addEventListener('resize', resize);
 // resize() is called in startup() after DOM is ready
