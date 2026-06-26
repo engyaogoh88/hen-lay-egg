@@ -1,6 +1,6 @@
 // ============================================================
 // HEN LAY EGG - A cute egg-catching game
-// 10 levels, wooden obstacles, superpowers, level selection
+// 10 levels, superpower eggs, obstacles, progressive difficulty
 // ============================================================
 
 const canvas = document.getElementById('gameCanvas');
@@ -15,13 +15,13 @@ const controlsDiv = document.getElementById('controls');
 
 // Game state
 let game = {
-  state: 'start', // start, levelSelect, playing, levelComplete, gameOver
+  state: 'start', // start, playing, levelComplete, gameOver
   score: 0,
   lives: 7,
   level: 1,
   unlockedLevels: 1,
   highScores: {},
-  levelTime: 60,
+  levelTime: 60, // seconds per level
   timeLeft: 60,
   lastTime: 0,
   hens: [],
@@ -32,24 +32,66 @@ let game = {
   basket: null,
   levelStartTime: 0,
   spawnTimer: 0,
+  bgOffset: 0,
   combo: 0,
   comboTimer: 0,
   shakeAmount: 0,
   flashTimer: 0,
   flashColor: '',
-  muted: false,
 };
 
-// Canvas sizing
-let W, H, SCALE;
+// Preloaded assets (images loaded from generated files)
+const assets = {};
+function loadAssets() {
+  const images = {
+    hen: 'hen.png',
+    basket: 'basket.png',
+    eggs: 'eggs.png',
+  };
+  Object.entries(images).forEach(([key, src]) => {
+    try {
+      const img = new Image();
+      img.onload = () => { assets[key] = img; };
+      img.onerror = () => { /* fallback to drawn graphics */ };
+      img.src = src;
+    } catch(e) {
+      /* Image not available, use fallback graphics */
+    }
+  });
+}
+
+// Safe startup - wait for DOM to be ready
+function startup() {
+  resize();
+  try { loadAssets(); } catch(e) { /* continue without image assets */ }
+  try {
+    showStartScreen();
+  } catch(e) {
+    console.error('Start screen error:', e.message);
+  }
+  try {
+    requestAnimationFrame(gameLoop);
+  } catch(e) {
+    console.error('Animation frame error:', e.message);
+  }
+}
+
+// Safe startup - script is at end of body, DOM is ready
+startup();
+// Force an initial draw (requestAnimationFrame may be throttled in some contexts)
+setTimeout(function() { try { draw(); } catch(e) {} }, 50);
+setTimeout(function() { try { draw(); } catch(e) {} }, 200);
+setTimeout(function() { try { draw(); } catch(e) {} }, 500);
 
 const powerupEmoji = {
-  golden: '🟡', speed: '⚩', shield: '🛡', magnet: '🧲',
-  shrink: '📦', slowmo: '⏱', double: '✨', giant: '🔶',
+  golden: '🟡', speed: '⚡', shield: '🛡️', magnet: '🧲',
+  shrink: '📦', slowmo: '⏱️', double: '✨', giant: '🔶',
   multi: '🌟', rainbow: '🌈'
 };
 
 function resize() {
+  if (!canvas) return;
+  // Use visualViewport for accurate mobile sizing (excludes URL bar)
   const vw = window.visualViewport ? window.visualViewport.width : window.innerWidth;
   const vh = window.visualViewport ? window.visualViewport.height : window.innerHeight;
   const isMobile = vw < 768;
@@ -65,261 +107,195 @@ function resize() {
   canvas.height = H;
 }
 window.addEventListener('resize', resize);
-
-// Preloaded assets
-const assets = {};
-function loadAssets() {
-  const images = { hen: 'hen.png', basket: 'basket.png', eggs: 'eggs.png' };
-  Object.entries(images).forEach(([key, src]) => {
-    try {
-      const img = new Image();
-      img.onload = () => { assets[key] = img; };
-      img.onerror = () => {};
-      img.src = src;
-    } catch(e) {}
-  });
-}
+// resize() is called in startup() after DOM is ready
 
 // ============================================================
 // LEVEL CONFIGURATIONS
 // ============================================================
 const LEVELS = [
   {
-    name: 'Sunny Farm', hens: 1, spawnRate: 1.8, eggGravity: 0.35,
+    name: 'Sunny Farm', hens: 1, spawnRate: 1.8, eggGravity: 0.28,
     blackChance: 0, powerupChance: 0.08,
-    obstacles: [
-      { type: 'wood', x: 0.3, y: 0.35, angle: 12 },
-      { type: 'wood', x: 0.7, y: 0.35, angle: -12 },
-    ],
+    planks: 4, plankYs: [0.22, 0.38, 0.54, 0.70],
+    plankAngles: [8, -8, 8, -8],
     powerupTypes: ['golden'],
-    bgColor1: '#87CEEB', bgColor2: '#98FB98',
-    desc: 'Eggs bounce off wooden planks! Catch them!',
+    bgColor1: '#87CEEB', bgColor2: '#90EE90',
+    desc: '4 wooden planks! Eggs bounce off each one!',
   },
   {
-    name: 'Duck Pond', hens: 1, spawnRate: 1.6, eggGravity: 0.38,
+    name: 'Berry Bushes', hens: 2, spawnRate: 1.6, eggGravity: 0.30,
     blackChance: 0.05, powerupChance: 0.1,
-    obstacles: [
-      { type: 'wood', x: 0.25, y: 0.3, angle: 15 },
-      { type: 'wood', x: 0.75, y: 0.3, angle: -15 },
-      { type: 'wood', x: 0.5, y: 0.5, angle: 0 },
-    ],
+    planks: 5, plankYs: [0.18, 0.32, 0.46, 0.60, 0.74],
+    plankAngles: [-10, 10, -10, 10, -10],
     powerupTypes: ['golden', 'speed'],
     bgColor1: '#5BA3D9', bgColor2: '#7EC8E3',
-    desc: 'More planks! Eggs roll left and right!',
+    desc: '5 planks + speed egg!',
   },
   {
-    name: 'Berry Bushes', hens: 2, spawnRate: 1.5, eggGravity: 0.4,
+    name: 'Corn Field', hens: 2, spawnRate: 1.5, eggGravity: 0.32,
     blackChance: 0.08, powerupChance: 0.1,
-    obstacles: [
-      { type: 'wood', x: 0.2, y: 0.25, angle: -20 },
-      { type: 'wood', x: 0.5, y: 0.4, angle: 20 },
-      { type: 'wood', x: 0.8, y: 0.25, angle: -20 },
-      { type: 'bush', x: 0.5, y: 0.65 },
-    ],
+    planks: 6, plankYs: [0.15, 0.27, 0.39, 0.51, 0.63, 0.75],
+    plankAngles: [12, -12, 12, -12, 12, -12],
     powerupTypes: ['golden', 'speed', 'shield'],
-    bgColor1: '#6BCB77', bgColor2: '#90EE90',
-    desc: 'Two hens! Shield egg protects from black eggs!',
+    bgColor1: '#FFD93D', bgColor2: '#FFF3B0',
+    desc: '6 planks! Shield protects from black eggs!',
   },
   {
-    name: 'Windy Hill', hens: 2, spawnRate: 1.4, eggGravity: 0.42,
+    name: 'Windy Hill', hens: 2, spawnRate: 1.4, eggGravity: 0.33,
     blackChance: 0.1, powerupChance: 0.1,
-    obstacles: [
-      { type: 'wood', x: 0.15, y: 0.2, angle: 25 },
-      { type: 'wood', x: 0.45, y: 0.35, angle: -25 },
-      { type: 'wood', x: 0.75, y: 0.2, angle: 25 },
-      { type: 'wind', x: 0.5, y: 0.55, w: 120 },
-    ],
+    planks: 6, plankYs: [0.14, 0.25, 0.36, 0.47, 0.58, 0.69],
+    plankAngles: [-15, 15, -15, 15, -15, 15],
+    hasWind: true, windStrength: 0.3,
     powerupTypes: ['golden', 'speed', 'shield', 'magnet'],
     bgColor1: '#B8E6FF', bgColor2: '#E0F7FA',
     desc: 'Wind blows eggs! Magnet attracts them!',
   },
   {
-    name: 'Corn Field', hens: 2, spawnRate: 1.3, eggGravity: 0.45,
+    name: 'Rainy Day', hens: 3, spawnRate: 1.3, eggGravity: 0.34,
     blackChance: 0.12, powerupChance: 0.12,
-    obstacles: [
-      { type: 'wood', x: 0.2, y: 0.2, angle: -15 },
-      { type: 'wood', x: 0.4, y: 0.35, angle: 15 },
-      { type: 'wood', x: 0.6, y: 0.35, angle: -15 },
-      { type: 'wood', x: 0.8, y: 0.2, angle: 15 },
-      { type: 'corn', x: 0.15, y: 0.7 },
-      { type: 'corn', x: 0.85, y: 0.7 },
-    ],
+    planks: 7, plankYs: [0.12, 0.22, 0.32, 0.42, 0.52, 0.62, 0.72],
+    plankAngles: [10, -10, 10, -10, 10, -10, 10],
+    hasRain: true,
     powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink'],
-    bgColor1: '#FFD93D', bgColor2: '#FFF3B0',
-    desc: 'Corn blocks + 4 planks! Big basket helps!',
-  },
-  {
-    name: 'Rainy Day', hens: 3, spawnRate: 1.2, eggGravity: 0.45,
-    blackChance: 0.15, powerupChance: 0.12,
-    obstacles: [
-      { type: 'wood', x: 0.2, y: 0.18, angle: 30 },
-      { type: 'wood', x: 0.5, y: 0.3, angle: -30 },
-      { type: 'wood', x: 0.8, y: 0.18, angle: 30 },
-      { type: 'wood', x: 0.35, y: 0.48, angle: 0 },
-      { type: 'wood', x: 0.65, y: 0.48, angle: 0 },
-      { type: 'rain', x: 0.5, y: 0.4, w: 200 },
-    ],
-    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo'],
     bgColor1: '#5C6BC0', bgColor2: '#9FA8DA',
-    desc: 'Rain makes it slippery! Slow-mo helps!',
+    desc: '7 planks + rain! Big basket helps!',
   },
   {
-    name: 'Fox Night', hens: 3, spawnRate: 1.1, eggGravity: 0.5,
+    name: 'Mountain Path', hens: 3, spawnRate: 1.2, eggGravity: 0.36,
+    blackChance: 0.15, powerupChance: 0.13,
+    planks: 7, plankYs: [0.10, 0.21, 0.30, 0.39, 0.48, 0.57, 0.66],
+    plankAngles: [-18, 18, -18, 18, -18, 18, -18],
+    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo'],
+    bgColor1: '#8D6E63', bgColor2: '#BCAAA4',
+    desc: 'Steep angles! Slow-mo essential!',
+  },
+  {
+    name: 'Fox Night', hens: 3, spawnRate: 1.1, eggGravity: 0.38,
     blackChance: 0.18, powerupChance: 0.13,
-    obstacles: [
-      { type: 'wood', x: 0.15, y: 0.15, angle: -35 },
-      { type: 'wood', x: 0.4, y: 0.25, angle: 35 },
-      { type: 'wood', x: 0.65, y: 0.25, angle: -35 },
-      { type: 'wood', x: 0.85, y: 0.15, angle: 35 },
-      { type: 'wood', x: 0.5, y: 0.45, angle: 0 },
-      { type: 'fox', x: 0.8, y: 0.65 },
-    ],
+    planks: 8, plankYs: [0.10, 0.18, 0.26, 0.34, 0.42, 0.50, 0.58, 0.66],
+    plankAngles: [15, -15, 15, -15, 15, -15, 15, -15],
+    hasWind: true, windStrength: 0.4,
     powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double'],
     bgColor1: '#2C3E50', bgColor2: '#34495E',
-    desc: 'Fox at the bottom! Double points egg!',
+    desc: '8 planks at night! Double points!',
   },
   {
-    name: 'Mountain Path', hens: 3, spawnRate: 1.0, eggGravity: 0.52,
-    blackChance: 0.2, powerupChance: 0.13,
-    obstacles: [
-      { type: 'wood', x: 0.1, y: 0.12, angle: 40 },
-      { type: 'wood', x: 0.3, y: 0.22, angle: -40 },
-      { type: 'wood', x: 0.5, y: 0.22, angle: 40 },
-      { type: 'wood', x: 0.7, y: 0.22, angle: -40 },
-      { type: 'wood', x: 0.9, y: 0.12, angle: 40 },
-      { type: 'rock', x: 0.5, y: 0.45 },
-    ],
+    name: 'Storm Castle', hens: 4, spawnRate: 1.0, eggGravity: 0.40,
+    blackChance: 0.20, powerupChance: 0.14,
+    planks: 8, plankYs: [0.10, 0.17, 0.24, 0.31, 0.38, 0.45, 0.52, 0.59],
+    plankAngles: [-20, 20, -20, 20, -20, 20, -20, 20],
+    hasWind: true, windStrength: 0.5, hasRain: true,
     powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double', 'giant'],
-    bgColor1: '#8D6E63', bgColor2: '#BCAAA4',
-    desc: 'Steep planks + rocks! Giant egg = big points!',
-  },
-  {
-    name: 'Storm Castle', hens: 4, spawnRate: 0.9, eggGravity: 0.55,
-    blackChance: 0.22, powerupChance: 0.14,
-    obstacles: [
-      { type: 'wood', x: 0.12, y: 0.12, angle: -45 },
-      { type: 'wood', x: 0.35, y: 0.2, angle: 45 },
-      { type: 'wood', x: 0.65, y: 0.2, angle: -45 },
-      { type: 'wood', x: 0.88, y: 0.12, angle: 45 },
-      { type: 'wood', x: 0.25, y: 0.35, angle: 0 },
-      { type: 'wood', x: 0.75, y: 0.35, angle: 0 },
-      { type: 'wind', x: 0.3, y: 0.55, w: 100 },
-      { type: 'rain', x: 0.7, y: 0.55, w: 100 },
-    ],
-    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double', 'giant', 'multi'],
     bgColor1: '#4A148C', bgColor2: '#7B1FA2',
-    desc: 'Storm chaos! Multi-egg splits into 3!',
+    desc: 'Storm chaos! Giant egg = big points!',
   },
   {
-    name: 'Dragon Farm', hens: 4, spawnRate: 0.8, eggGravity: 0.6,
-    blackChance: 0.25, powerupChance: 0.15,
-    obstacles: [
-      { type: 'wood', x: 0.1, y: 0.1, angle: 50 },
-      { type: 'wood', x: 0.25, y: 0.18, angle: -50 },
-      { type: 'wood', x: 0.4, y: 0.25, angle: 50 },
-      { type: 'wood', x: 0.6, y: 0.25, angle: -50 },
-      { type: 'wood', x: 0.75, y: 0.18, angle: 50 },
-      { type: 'wood', x: 0.9, y: 0.1, angle: -50 },
-      { type: 'wood', x: 0.5, y: 0.38, angle: 0 },
-      { type: 'wind', x: 0.2, y: 0.55, w: 100 },
-      { type: 'rain', x: 0.8, y: 0.55, w: 100 },
-      { type: 'dragon', x: 0.5, y: 0.65 },
-    ],
-    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double', 'giant', 'multi', 'rainbow'],
+    name: 'Dragon Farm', hens: 4, spawnRate: 0.9, eggGravity: 0.42,
+    blackChance: 0.22, powerupChance: 0.14,
+    planks: 8, plankYs: [0.10, 0.165, 0.23, 0.295, 0.36, 0.425, 0.49, 0.555],
+    plankAngles: [-22, 22, -22, 22, -22, 22, -22, 22],
+    hasWind: true, windStrength: 0.4, hasRain: true, dragon: true,
+    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double', 'giant', 'multi'],
     bgColor1: '#E65100', bgColor2: '#FF9800',
-    desc: 'FINAL: Dragon! Rainbow egg! Everything!',
+    desc: 'Dragon! Multi-egg splits into 3!',
+  },
+  {
+    name: 'Lava Kingdom', hens: 4, spawnRate: 0.85, eggGravity: 0.45,
+    blackChance: 0.25, powerupChance: 0.15,
+    planks: 8, plankYs: [0.09, 0.155, 0.22, 0.285, 0.35, 0.415, 0.48, 0.545],
+    plankAngles: [25, -25, 25, -25, 25, -25, 25, -25],
+    hasWind: true, windStrength: 0.6, hasRain: true, dragon: true,
+    powerupTypes: ['golden', 'speed', 'shield', 'magnet', 'shrink', 'slowmo', 'double', 'giant', 'multi', 'rainbow'],
+    bgColor1: '#B71C1C', bgColor2: '#E65100',
+    desc: 'FINAL: Lava, Dragon, Rainbow! Everything!',
   },
 ];
 
 // ============================================================
-// INPUT
-// ============================================================
-const keys = {};
-window.addEventListener('keydown', e => { keys[e.key] = true; if (['ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault(); });
-window.addEventListener('keyup', e => { keys[e.key] = false; });
-
-let touchLeft = false, touchRight = false;
-const leftBtn = document.createElement('button');
-leftBtn.textContent = '◀'; leftBtn.id = 'leftBtn';
-const rightBtn = document.createElement('button');
-rightBtn.textContent = '▶'; rightBtn.id = 'rightBtn';
-controlsDiv.appendChild(leftBtn); controlsDiv.appendChild(rightBtn);
-leftBtn.addEventListener('touchstart', e => { e.preventDefault(); touchLeft = true; });
-leftBtn.addEventListener('touchend', e => { e.preventDefault(); touchLeft = false; });
-rightBtn.addEventListener('touchstart', e => { e.preventDefault(); touchRight = true; });
-rightBtn.addEventListener('touchend', e => { e.preventDefault(); touchRight = false; });
-
-// ============================================================
-// CREATION FUNCTIONS
+// BASKET
 // ============================================================
 function createBasket() {
   return {
-    x: W / 2, y: H - 50 * SCALE,
-    width: 70 * SCALE, height: 40 * SCALE,
+    x: W/2, y: H - 45 * SCALE,
+    width: 75 * SCALE, height: 42 * SCALE,
     speed: 8 * SCALE, dir: 0,
-    shield: false, shieldTimer: 0,
-    magnet: false, magnetTimer: 0,
-    slowmo: false, slowmoTimer: 0,
-    doublePoints: false, doubleTimer: 0,
-    big: false, bigTimer: 0,
-    rainbow: false, rainbowTimer: 0,
+    shield: false, shieldTimer: 0, magnet: false, magnetTimer: 0,
+    slowmo: false, slowmoTimer: 0, doublePoints: false, doubleTimer: 0,
+    big: false, bigTimer: 0, rainbow: false, rainbowTimer: 0,
     speedBoostTimer: 0,
   };
 }
 
+// ============================================================
+// HEN
+// ============================================================
 function createHen(x) {
   return {
-    x, y: 55 * SCALE,
-    width: 50 * SCALE, height: 50 * SCALE,
-    animTimer: 0, layTimer: Math.random() * 500,
-    baseY: 55 * SCALE,
+    x: x,
+    y: 80 * SCALE,  // Below the UI bar
+    width: 45 * SCALE,
+    height: 45 * SCALE,
+    animTimer: 0,
+    laying: false,
+    layTimer: Math.random() * 1000 + 500,
   };
 }
 
+// ============================================================
+// EGG
+// ============================================================
 function createEgg(x, y, type = 'normal') {
   return {
-    x, y,
-    vx: (Math.random() - 0.5) * 1.5 * SCALE,
-    vy: 0.5 * SCALE,
-    width: 16 * SCALE, height: 22 * SCALE,
+    x, y, vx: (Math.random() - 0.5) * 0.5 * SCALE,
+    vy: 2 * SCALE,
+    width: 18 * SCALE, height: 24 * SCALE,
     type, rotation: 0, active: true, bounces: 0,
-    onGround: false, groundTimer: 0,
+    rolling: false, rollSpeed: 0, rollDir: 0, currentPlank: -1,
   };
 }
 
-function createObstacle(cfg, idx) {
-  const margin = 40 * SCALE;
-  const usableW = W - margin * 2;
-  const col = (idx % 3);
-  const row = Math.floor(idx / 3);
-  const spacing = usableW / 4;
-  
-  let x, y;
-  if (cfg.x !== undefined) {
-    x = margin + cfg.x * usableW;
-    y = 100 * SCALE + cfg.y * (H - 220 * SCALE);
-  } else {
-    x = margin + spacing + col * spacing;
-    y = 130 * SCALE + row * 120 * SCALE;
-  }
-  
+// ============================================================
+// OBSTACLE
+// ============================================================
+function createObstacle(type, x, y) {
   const sizes = {
-    wood: { w: 90 * SCALE, h: 18 * SCALE },
-    rock: { w: 55 * SCALE, h: 40 * SCALE },
-    bush: { w: 50 * SCALE, h: 35 * SCALE },
-    corn: { w: 30 * SCALE, h: 55 * SCALE },
-    wind: { w: 100 * SCALE, h: 50 * SCALE },
-    rain: { w: 150 * SCALE, h: 60 * SCALE },
-    fox: { w: 50 * SCALE, h: 45 * SCALE },
-    dragon: { w: 80 * SCALE, h: 55 * SCALE },
+    rock1: { w: 50, h: 35 },
+    rock2: { w: 60, h: 40 },
+    bush1: { w: 45, h: 30 },
+    bush2: { w: 50, h: 35 },
+    corn1: { w: 30, h: 50 },
+    corn2: { w: 35, h: 55 },
+    wind1: { w: 80, h: 30 },
+    rain1: { w: 60, h: 25 },
+    fox1: { w: 45, h: 40 },
+    dragon1: { w: 70, h: 50 },
   };
-  const s = sizes[cfg.type] || sizes.rock;
-  const angle = (cfg.angle || 0) * Math.PI / 180;
-  
+  const s = sizes[type] || { w: 40, h: 30 };
   return {
-    ...cfg, x, y, width: s.w, height: s.h,
-    angle, animTimer: Math.random() * 1000,
+    type: type,
+    x: x,
+    y: y,
+    width: s.w * SCALE,
+    height: s.h * SCALE,
+    animTimer: Math.random() * 1000,
   };
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+function spawnParticles(x, y, color, count = 8) {
+  for (let i = 0; i < count; i++) {
+    game.particles.push({
+      x: x,
+      y: y,
+      vx: (Math.random() - 0.5) * 6 * SCALE,
+      vy: (Math.random() - 0.5) * 6 * SCALE - 2,
+      life: 1,
+      color: color,
+      size: (Math.random() * 4 + 2) * SCALE,
+    });
+  }
 }
 
 // ============================================================
@@ -327,311 +303,487 @@ function createObstacle(cfg, idx) {
 // ============================================================
 function initLevel(level) {
   const config = LEVELS[level - 1];
-  game.hens = [];
-  game.eggs = [];
-  game.obstacles = [];
-  game.particles = [];
+  game.hens = []; game.eggs = []; game.obstacles = [];
+  game.powerups = []; game.particles = [];
   game.basket = createBasket();
-  game.spawnTimer = 0;
-  game.combo = 0;
-  game.comboTimer = 0;
-  game.timeLeft = game.levelTime;
-  game.levelStartTime = performance.now();
+  game.spawnTimer = 0; game.combo = 0; game.comboTimer = 0;
+  game.timeLeft = game.levelTime; game.levelStartTime = performance.now();
   game.shakeAmount = 0;
-  
+  game.hasWind = config.hasWind || false;
+  game.hasRain = config.hasRain || false;
+
   const henSpacing = W / (config.hens + 1);
   for (let i = 0; i < config.hens; i++) {
     game.hens.push(createHen(henSpacing * (i + 1)));
   }
-  
-  config.obstacles.forEach((obs, i) => {
-    game.obstacles.push(createObstacle(obs, i));
-  });
+
+  // Create wooden planks
+  const margin = 50 * SCALE;
+  const usableW = W - margin * 2;
+  for (let i = 0; i < config.planks; i++) {
+    const py = config.plankYs[i];
+    const yPos = 100 * SCALE + py * (H - 200 * SCALE);
+    const angle = (config.plankAngles[i] || 0) * Math.PI / 180;
+    const pWidth = (0.22 + Math.random() * 0.18) * usableW;
+    const offsetX = (Math.random() - 0.5) * usableW * 0.4;
+    const xPos = margin + usableW * 0.5 + offsetX;
+    game.obstacles.push({
+      type: 'plank', x: xPos, y: yPos, width: pWidth, height: 16 * SCALE,
+      angle, index: i,
+    });
+  }
+  game.obstacles.sort((a, b) => a.y - b.y);
+  // Update plank indices after sorting
+  game.obstacles.forEach((o, i) => o.index = i);
 }
+
+// ============================================================
+// INPUT
+// ============================================================
+const keys = {};
+window.addEventListener('keydown', e => { keys[e.key] = true; });
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+
+// Touch controls
+let touchLeft = false, touchRight = false;
+function setupTouch() {
+  const leftBtn = document.createElement('button');
+  leftBtn.textContent = '◀';
+  leftBtn.id = 'leftBtn';
+  const rightBtn = document.createElement('button');
+  rightBtn.textContent = '▶';
+  rightBtn.id = 'rightBtn';
+  controlsDiv.appendChild(leftBtn);
+  controlsDiv.appendChild(rightBtn);
+
+  leftBtn.addEventListener('touchstart', e => { e.preventDefault(); touchLeft = true; });
+  leftBtn.addEventListener('touchend', e => { e.preventDefault(); touchLeft = false; });
+  rightBtn.addEventListener('touchstart', e => { e.preventDefault(); touchRight = true; });
+  rightBtn.addEventListener('touchend', e => { e.preventDefault(); touchRight = false; });
+  leftBtn.addEventListener('mousedown', e => { e.preventDefault(); touchLeft = true; });
+  leftBtn.addEventListener('mouseup', e => { e.preventDefault(); touchLeft = false; });
+  rightBtn.addEventListener('mousedown', e => { e.preventDefault(); touchRight = true; });
+  rightBtn.addEventListener('mouseup', e => { e.preventDefault(); touchRight = false; });
+}
+setupTouch();
 
 // ============================================================
 // UPDATE
 // ============================================================
 function update(dt) {
   if (game.state !== 'playing') return;
-  
+
   const config = LEVELS[game.level - 1];
-  const slowFactor = game.basket.slowmo ? 0.6 : 1;
+  const slowFactor = game.basket.slowmo ? 0.5 : 1;
   const effectiveDt = dt * slowFactor;
-  
-  // Time
+
+  // Update time
   game.timeLeft -= dt;
   if (game.timeLeft <= 0) {
     game.state = 'levelComplete';
     showLevelComplete();
     return;
   }
-  
+
   // Basket movement
   const basket = game.basket;
   if (keys['ArrowLeft'] || keys['a'] || keys['A'] || touchLeft) basket.dir = -1;
   else if (keys['ArrowRight'] || keys['d'] || keys['D'] || touchRight) basket.dir = 1;
   else basket.dir = 0;
   basket.x += basket.dir * basket.speed;
-  const halfW = basket.width / 2;
-  basket.x = Math.max(halfW, Math.min(W - halfW, basket.x));
-  
+  basket.x = Math.max(basket.width / 2, Math.min(W - basket.width / 2, basket.x));
+
   // Powerup timers
-  if (basket.speedBoostTimer > 0) { basket.speedBoostTimer -= dt; if (basket.speedBoostTimer <= 0) basket.speed = 8 * SCALE; }
+  if (basket.speedBoostTimer > 0) { basket.speedBoostTimer -= dt; if (basket.speedBoostTimer <= 0) basket.speed = 6 * SCALE; }
   if (basket.shieldTimer > 0) { basket.shieldTimer -= dt; if (basket.shieldTimer <= 0) basket.shield = false; }
   if (basket.magnetTimer > 0) { basket.magnetTimer -= dt; if (basket.magnetTimer <= 0) basket.magnet = false; }
   if (basket.slowmoTimer > 0) { basket.slowmoTimer -= dt; if (basket.slowmoTimer <= 0) basket.slowmo = false; }
   if (basket.doubleTimer > 0) { basket.doubleTimer -= dt; if (basket.doubleTimer <= 0) basket.doublePoints = false; }
   if (basket.bigTimer > 0) { basket.bigTimer -= dt; if (basket.bigTimer <= 0) basket.big = false; }
-  if (basket.rainbowTimer > 0) { basket.rainbowTimer -= dt; if (basket.rainbowTimer <= 0) { basket.shield=false; basket.magnet=false; basket.doublePoints=false; basket.big=false; } }
-  
+  if (basket.rainbowTimer > 0) { basket.rainbowTimer -= dt; if (basket.rainbowTimer <= 0) basket.rainbow = false; }
+
+  // Update basket size
   basket.width = (basket.big ? 105 : 70) * SCALE;
-  basket.height = (basket.big ? 56 : 40) * SCALE;
-  
+
   // Spawn eggs
   game.spawnTimer -= dt;
   if (game.spawnTimer <= 0) {
     game.spawnTimer = config.spawnRate;
-    const hen = game.hens[Math.floor(Math.random() * game.hens.length)];
+    const hen = game.hens[Math.floor(Math.random() * game.hens. length)];
     let type = 'normal';
     const r = Math.random();
-    if (r < config.blackChance) type = 'black';
-    else if (r < config.blackChance + config.powerupChance) type = config.powerupTypes[Math.floor(Math.random() * config.powerupTypes.length)];
-    game.eggs.push(createEgg(hen.x, hen.y + hen.height * 0.3, type));
+    if (r < config.blackChance) {
+      type = 'black';
+    } else if (r < config.blackChance + config.powerupChance) {
+      type = config.powerupTypes[Math.floor(Math.random() * config.powerupTypes.length)];
+    }
+    game.eggs.push(createEgg(hen.x, hen.y + hen.height / 2, type));
   }
-  
-  // Update hens
+
+  // Update hens animation
   game.hens.forEach(hen => {
     hen.animTimer += dt;
-    hen.baseY = 55 * SCALE;
   });
-  
-  // Update eggs with proper physics
+
+  // Update eggs - New physics: vertical fall + roll on planks
   const gravity = config.eggGravity * SCALE;
-  const friction = 0.98;
-  const bounciness = 0.65;
+  const planks = game.obstacles.filter(o => o.type === 'plank');
   
   game.eggs.forEach(egg => {
     if (!egg.active) return;
     
-    // Apply gravity
-    egg.vy += gravity * effectiveDt * 60;
-    egg.vy = Math.min(egg.vy, 12 * SCALE);
-    
-    // Apply velocity
-    egg.x += egg.vx * effectiveDt * 60;
-    egg.y += egg.vy * effectiveDt * 60;
-    egg.rotation += egg.vx * 0.05 * effectiveDt * 60;
-    
-    // Wind effect
-    game.obstacles.forEach(obs => {
-      if (obs.type === 'wind') {
-        const dx = egg.x - obs.x;
-        const dy = egg.y - obs.y;
-        if (Math.abs(dx) < obs.width / 2 && Math.abs(dy) < obs.height / 2) {
-          egg.vx += 2.5 * SCALE * Math.sign(dx) * effectiveDt * 60;
-        }
-      }
-    });
-    
-    // Magnet attraction
-    if (basket.magnet) {
-      const dx = basket.x - egg.x;
-      const dy = (basket.y - basket.height/2) - egg.y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      if (dist > 5 && dist < 180 * SCALE) {
-        egg.vx += (dx / dist) * 3 * SCALE * effectiveDt * 60;
-        egg.vy += (dy / dist) * 2 * SCALE * effectiveDt * 60;
-      }
-    }
-    
-    // Wall bounce
-    if (egg.x < egg.width/2) { egg.x = egg.width/2; egg.vx = Math.abs(egg.vx) * bounciness; }
-    if (egg.x > W - egg.width/2) { egg.x = W - egg.width/2; egg.vx = -Math.abs(egg.vx) * bounciness; }
-    
-    // Collision with angled wooden planks and obstacles
-    game.obstacles.forEach(obs => {
-      if (obs.type === 'wind' || obs.type === 'rain') return;
-      
-      const dx = egg.x - obs.x;
-      const dy = egg.y - obs.y;
-      
-      if (obs.type === 'wood' && obs.angle) {
-        // Rotated collision for angled wooden planks
-        const cos = Math.cos(-obs.angle);
-        const sin = Math.sin(-obs.angle);
-        const localX = dx * cos - dy * sin;
-        const localY = dx * sin + dy * cos;
-        
-        const halfW = obs.width / 2 + egg.width * 0.3;
-        const halfH = obs.height / 2 + egg.height * 0.3;
-        
-        if (Math.abs(localX) < halfW && Math.abs(localY) < halfH) {
-          // Bounce off the plank - reflect velocity along the plank's normal
-          const normalX = Math.sin(obs.angle);
-          const normalY = -Math.cos(obs.angle);
-          
-          // Determine which side we hit
-          const dotProduct = egg.vx * normalX + egg.vy * normalY;
-          
-          // Reflect velocity
-          egg.vx -= 2 * dotProduct * normalX * bounciness;
-          egg.vy -= 2 * dotProduct * normalY * bounciness;
-          
-          // Add some randomness based on where on the plank we hit
-          const hitPos = localX / halfW; // -1 to 1
-          egg.vx += hitPos * 2.5 * SCALE;
-          
-          // Push egg out of collision
-          egg.y = obs.y - halfH - 2;
-          
-          egg.bounces++;
-          spawnParticles(egg.x, egg.y, '#8B4513', 4);
+    if (egg.rolling) {
+      // Rolling along a plank
+      egg.x += egg.rollSpeed * egg.rollDir * effectiveDt * 60;
+      const currentPlank = planks.find(p => p.index === egg.currentPlank);
+      if (currentPlank) {
+        egg.y = currentPlank.y - currentPlank.height/2 - egg.height/2;
+        // Check if rolled off the edge
+        const pLeft = currentPlank.x - currentPlank.width/2;
+        const pRight = currentPlank.x + currentPlank.width/2;
+        if (egg.x < pLeft - egg.width/2 || egg.x > pRight + egg.width/2) {
+          egg.rolling = false;
+          egg.vy = 4 * SCALE;
+          egg.vx = egg.rollDir * 1.5 * SCALE;
+          egg.currentPlank = -1;
         }
       } else {
-        // Simple AABB collision for non-angled obstacles
-        const obsLeft = obs.x - obs.width/2;
-        const obsRight = obs.x + obs.width/2;
-        const obsTop = obs.y - obs.height/2;
-        const obsBottom = obs.y + obs.height/2;
-        const eLeft = egg.x - egg.width/2;
-        const eRight = egg.x + egg.width/2;
-        const eTop = egg.y - egg.height/2;
-        const eBottom = egg.y + egg.height/2;
-        
-        if (eRight > obsLeft && eLeft < obsRight && eBottom > obsTop && eTop < obsBottom) {
-          // Determine smallest penetration
-          const overlapLeft = eRight - obsLeft;
-          const overlapRight = obsRight - eLeft;
-          const overlapTop = eBottom - obsTop;
-          const overlapBottom = obsBottom - eTop;
-          const minOverlap = Math.min(overlapLeft, overlapRight, overlapTop, overlapBottom);
-          
-          if (minOverlap === overlapTop) {
-            egg.vy = -Math.abs(egg.vy) * bounciness;
-            egg.y = obsTop - egg.height/2;
-            egg.vx += (Math.random() - 0.5) * 2 * SCALE;
-          } else if (minOverlap === overlapBottom) {
-            egg.vy = Math.abs(egg.vy) * 0.5;
-            egg.y = obsBottom + egg.height/2;
-          } else if (minOverlap === overlapLeft) {
-            egg.vx = -Math.abs(egg.vx) * bounciness;
-            egg.x = obsLeft - egg.width/2;
-          } else {
-            egg.vx = Math.abs(egg.vx) * bounciness;
-            egg.x = obsRight + egg.width/2;
-          }
-          
-          egg.bounces++;
-          spawnParticles(egg.x, egg.y, '#8B4513', 3);
+        egg.rolling = false;
+      }
+    } else {
+      // Falling vertically
+      egg.vy += gravity * effectiveDt * 60;
+      egg.vy = Math.min(egg.vy, 14 * SCALE);
+      egg.x += egg.vx * effectiveDt * 60;
+      egg.y += egg.vy * effectiveDt * 60;
+      egg.rotation += egg.vx * 0.03 * effectiveDt * 60;
+
+      // Wind effect
+      if (game.hasWind) {
+        egg.vx += Math.sin(performance.now()/500 + egg.x) * config.windStrength * 0.5 * SCALE * effectiveDt;
+      }
+
+      // Magnet attraction
+      if (basket.magnet) {
+        const dx = basket.x - egg.x;
+        const dy = basket.y - egg.y;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist > 10 && dist < 180*SCALE) {
+          egg.vx += (dx/dist) * 3 * SCALE * effectiveDt;
+          egg.vy += (dy/dist) * 2 * SCALE * effectiveDt;
         }
       }
-    });
-    
+
+      // Wall bounce
+      if (egg.x < egg.width/2) { egg.x = egg.width/2; egg.vx = Math.abs(egg.vx)*0.6; }
+      if (egg.x > W - egg.width/2) { egg.x = W - egg.width/2; egg.vx = -Math.abs(egg.vx)*0.6; }
+
+      // Check collision with planks
+      for (let pi = 0; pi < planks.length; pi++) {
+        if (egg.vy <= 0) continue;
+        const p = planks[pi];
+        // Check if egg is above and hitting the plank
+        if (egg.y + egg.height/2 > p.y - p.height/2 - 5 && 
+            egg.y + egg.height/2 < p.y + p.height/2 &&
+            egg.x > p.x - p.width/2 - egg.width/2 &&
+            egg.x < p.x + p.width/2 + egg.width/2 &&
+            egg.vy > 1) {
+          
+          // Hit the plank! Roll left or right
+          const hitPos = (egg.x - p.x) / (p.width/2);
+          egg.rollDir = Math.random() < 0.5 + hitPos * 0.3 ? 1 : -1;
+          egg.rolling = true;
+          egg.rollSpeed = 2.5 + Math.random() * 2.5;
+          egg.y = p.y - p.height/2 - egg.height/2;
+          egg.vy = 0;
+          egg.vx = 0;
+          egg.currentPlank = p.index;
+          spawnParticles(egg.x, p.y - p.height/2, '#8B4513', 4);
+          break;
+        }
+      }
+    }
+
     // Basket collision
     const bLeft = basket.x - basket.width/2;
     const bRight = basket.x + basket.width/2;
     const bTop = basket.y - basket.height/2;
     const bBottom = basket.y + basket.height/2;
-    
+
     if (egg.x + egg.width/2 > bLeft && egg.x - egg.width/2 < bRight &&
         egg.y + egg.height/2 > bTop && egg.y - egg.height/2 < bBottom) {
       egg.active = false;
       handleEggCatch(egg);
     }
-    
+
     // Off screen
-    if (egg.y > H + 30 * SCALE) {
+    if (egg.y > H + 50) {
       egg.active = false;
-      if (egg.type !== 'black') game.combo = 0;
+      if (egg.type !== 'black') {
+        game.combo = 0;
+      }
     }
   });
-  
-  // Clean up
+
+  // Clean up inactive eggs
   game.eggs = game.eggs.filter(e => e.active);
-  
+
   // Update particles
   game.particles.forEach(p => {
     p.x += p.vx;
     p.y += p.vy;
     p.vy += 0.1 * SCALE;
-    p.life -= 0.025;
+    p.life -= 0.02;
   });
   game.particles = game.particles.filter(p => p.life > 0);
-  
-  if (game.comboTimer > 0) { game.comboTimer -= dt; if (game.comboTimer <= 0) game.combo = 0; }
+
+  // Combo timer
+  if (game.comboTimer > 0) {
+    game.comboTimer -= dt;
+    if (game.comboTimer <= 0) game.combo = 0;
+  }
+
+  // Shake decay
+  if (game.shakeAmount > 0) game.shakeAmount *= 0.9;
+  if (game.shakeAmount < 0.1) game.shakeAmount = 0;
+
+  // Flash decay
+  if (game.flashTimer > 0) game.flashTimer -= dt;
 }
 
 // ============================================================
-// HANDLERS
+// HANDLE EGG CATCH
 // ============================================================
 function handleEggCatch(egg) {
   const basket = game.basket;
   let points = 10;
-  let pColor = '#FFD700';
-  
+  let particleColor = '#FFD700';
+
   switch (egg.type) {
     case 'black':
       if (basket.shield) {
-        basket.shield = false; basket.shieldTimer = 0;
-        pColor = '#4FC3F7'; spawnParticles(egg.x, egg.y, pColor, 12);
-        showText(egg.x, egg.y, 'SHIELD!', '#4FC3F7'); playSound('hit');
+        basket.shield = false;
+        basket.shieldTimer = 0;
+        particleColor = '#4FC3F7';
+        spawnParticles(egg.x, egg.y, particleColor, 12);
+        showText(egg.x, egg.y, 'BLOCKED!', '#4FC3F7');
+        playSound('hit');
       } else {
-        game.lives--; game.combo = 0;
+        game.lives--;
+        game.combo = 0;
+        particleColor = '#333';
         spawnParticles(egg.x, egg.y, '#FF0000', 15);
         showText(egg.x, egg.y, '-1 LIFE', '#FF0000');
-        game.shakeAmount = 8; game.flashTimer = 0.3; game.flashColor = 'rgba(255,0,0,0.3)';
+        game.shakeAmount = 10;
+        game.flashTimer = 0.3;
+        game.flashColor = 'rgba(255,0,0,0.3)';
         playSound('bad');
-        if (game.lives <= 0) { game.state = 'gameOver'; showGameOver(); return; }
+        if (game.lives <= 0) {
+          game.state = 'gameOver';
+          showGameOver();
+          return;
+        }
       }
       break;
-    case 'golden': points = 50; pColor = '#FFD700'; spawnParticles(egg.x, egg.y, pColor, 20); showText(egg.x, egg.y, '+50!', '#FFD700'); playSound('golden'); break;
-    case 'speed': points = 15; basket.speed = 12 * SCALE; basket.speedBoostTimer = 5; pColor = '#00E676'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, 'SPEED!', '#00E676'); playSound('powerup'); break;
-    case 'shield': points = 15; basket.shield = true; basket.shieldTimer = 15; pColor = '#4FC3F7'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, 'SHIELD!', '#4FC3F7'); playSound('powerup'); break;
-    case 'magnet': points = 15; basket.magnet = true; basket.magnetTimer = 10; pColor = '#E91E63'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, 'MAGNET!', '#E91E63'); playSound('powerup'); break;
-    case 'shrink': points = 15; basket.big = true; basket.bigTimer = 12; pColor = '#9C27B0'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, 'BIG!', '#9C27B0'); playSound('powerup'); break;
-    case 'slowmo': points = 15; basket.slowmo = true; basket.slowmoTimer = 8; pColor = '#00BCD4'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, 'SLOW!', '#00BCD4'); playSound('powerup'); break;
-    case 'double': points = 15; basket.doublePoints = true; basket.doubleTimer = 10; pColor = '#FF9800'; spawnParticles(egg.x, egg.y, pColor, 15); showText(egg.x, egg.y, '2X', '#FF9800'); playSound('powerup'); break;
-    case 'giant': points = 100; pColor = '#FF5722'; spawnParticles(egg.x, egg.y, pColor, 20); showText(egg.x, egg.y, '+100', '#FF5722'); game.shakeAmount = 5; playSound('golden'); break;
-    case 'multi': points = 5;
+    case 'golden':
+      points = 50;
+      particleColor = '#FFD700';
+      spawnParticles(egg.x, egg.y, particleColor, 20);
+      showText(egg.x, egg.y, '+50', '#FFD700');
+      playSound('golden');
+      break;
+    case 'speed':
+      points = 15;
+      basket.speed = 9 * SCALE;
+      basket.speedBoostTimer = 5;
+      particleColor = '#00E676';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, 'SPEED!', '#00E676');
+      playSound('powerup');
+      break;
+    case 'shield':
+      points = 15;
+      basket.shield = true;
+      basket.shieldTimer = 15;
+      particleColor = '#4FC3F7';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, 'SHIELD!', '#4FC3F7');
+      playSound('powerup');
+      break;
+    case 'magnet':
+      points = 15;
+      basket.magnet = true;
+      basket.magnetTimer = 10;
+      particleColor = '#E91E63';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, 'MAGNET!', '#E91E63');
+      playSound('powerup');
+      break;
+    case 'shrink':
+      points = 15;
+      basket.big = true;
+      basket.bigTimer = 12;
+      particleColor = '#9C27B0';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, 'BIG BASKET!', '#9C27B0');
+      playSound('powerup');
+      break;
+    case 'slowmo':
+      points = 15;
+      basket.slowmo = true;
+      basket.slowmoTimer = 8;
+      particleColor = '#00BCD4';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, 'SLOW-MO!', '#00BCD4');
+      playSound('powerup');
+      break;
+    case 'double':
+      points = 15;
+      basket.doublePoints = true;
+      basket.doubleTimer = 10;
+      particleColor = '#FF9800';
+      spawnParticles(egg.x, egg.y, particleColor, 15);
+      showText(egg.x, egg.y, '2X POINTS!', '#FF9800');
+      playSound('powerup');
+      break;
+    case 'giant':
+      points = 100;
+      particleColor = '#FF5722';
+      spawnParticles(egg.x, egg.y, particleColor, 25);
+      showText(egg.x, egg.y, '+100 GIANT!', '#FF5722');
+      game.shakeAmount = 5;
+      playSound('golden');
+      break;
+    case 'multi':
+      points = 5;
+      // Spawn 3 mini eggs
       for (let i = 0; i < 3; i++) {
         const mini = createEgg(egg.x, egg.y, 'normal');
-        mini.vx = (i - 1) * 4 * SCALE; mini.vy = -3 * SCALE;
+        mini.vx = (i - 1) * 3 * SCALE;
+        mini.vy = -2;
         game.eggs.push(mini);
       }
-      pColor = '#E040FB'; spawnParticles(egg.x, egg.y, pColor, 20); showText(egg.x, egg.y, 'MULTI!', '#E040FB'); playSound('powerup'); break;
-    case 'rainbow': points = 30;
-      basket.shield=true; basket.shieldTimer=10; basket.magnet=true; basket.magnetTimer=10;
-      basket.doublePoints=true; basket.doubleTimer=10; basket.big=true; basket.bigTimer=10;
-      pColor = '#FF69B4'; spawnParticles(egg.x, egg.y, '#FF0000', 8); spawnParticles(egg.x, egg.y, '#00FF00', 8); spawnParticles(egg.x, egg.y, '#0000FF', 8);
-      showText(egg.x, egg.y, 'RAINBOW!', '#FF69B4'); playSound('golden'); game.shakeAmount = 6; break;
-    default: spawnParticles(egg.x, egg.y, '#90EE90', 8); playSound('catch'); break;
+      particleColor = '#E040FB';
+      spawnParticles(egg.x, egg.y, particleColor, 20);
+      showText(egg.x, egg.y, 'MULTI!', '#E040FB');
+      playSound('powerup');
+      break;
+    case 'rainbow':
+      points = 30;
+      basket.shield = true; basket.shieldTimer = 10;
+      basket.magnet = true; basket.magnetTimer = 10;
+      basket.doublePoints = true; basket.doubleTimer = 10;
+      basket.big = true; basket.bigTimer = 10;
+      particleColor = '#FFFFFF';
+      spawnParticles(egg.x, egg.y, '#FF0000', 10);
+      spawnParticles(egg.x, egg.y, '#00FF00', 10);
+      spawnParticles(egg.x, egg.y, '#0000FF', 10);
+      showText(egg.x, egg.y, '🌈 RAINBOW!', '#FF69B4');
+      game.shakeAmount = 8;
+      playSound('golden');
+      break;
+    default:
+      // Normal egg
+      particleColor = '#FFD700';
+      spawnParticles(egg.x, egg.y, '#90EE90', 8);
+      playSound('catch');
+      break;
   }
-  
-  game.combo++; game.comboTimer = 2;
-  if (game.combo > 1) points += game.combo * 2;
+
+  // Combo
+  game.combo++;
+  game.comboTimer = 2;
+  if (game.combo > 1) {
+    points += game.combo * 2;
+  }
+
+  // Double points
   if (basket.doublePoints) points *= 2;
+
   game.score += points;
   updateUI();
 }
 
-// ============================================================
-// PARTICLES & TEXT
-// ============================================================
-function spawnParticles(x, y, color, count) {
-  for (let i = 0; i < count; i++) {
-    game.particles.push({
-      x, y,
-      vx: (Math.random() - 0.5) * 6 * SCALE,
-      vy: (Math.random() - 0.3) * 5 * SCALE - 2 * SCALE,
-      life: 1, color, size: (2 + Math.random() * 3) * SCALE,
-    });
-  }
-}
-
+// Floating texts
 let floatingTexts = [];
 function showText(x, y, text, color) {
   floatingTexts.push({ x, y, text, color, life: 1 });
+}
+
+// ============================================================
+// AUDIO (Web Audio API - procedural sounds)
+// ============================================================
+let audioCtx = null;
+function initAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { /* no audio support */ }
+}
+
+function playSound(type) {
+  if (muted) return;
+  if (!audioCtx) return;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+
+  switch(type) {
+    case 'catch':
+      osc.frequency.setValueAtTime(523, now); // C5
+      osc.frequency.setValueAtTime(659, now + 0.1); // E5
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc.start(now); osc.stop(now + 0.2);
+      break;
+    case 'golden':
+      osc.frequency.setValueAtTime(523, now);
+      osc.frequency.setValueAtTime(659, now + 0.08);
+      osc.frequency.setValueAtTime(784, now + 0.16);
+      osc.frequency.setValueAtTime(1047, now + 0.24);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.35);
+      osc.start(now); osc.stop(now + 0.35);
+      break;
+    case 'bad':
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(200, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.3);
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now); osc.stop(now + 0.3);
+      break;
+    case 'powerup':
+      osc.frequency.setValueAtTime(440, now);
+      osc.frequency.setValueAtTime(554, now + 0.06);
+      osc.frequency.setValueAtTime(659, now + 0.12);
+      osc.frequency.setValueAtTime(880, now + 0.18);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+      osc.start(now); osc.stop(now + 0.3);
+      break;
+    case 'levelup':
+      [523, 659, 784, 1047].forEach((freq, i) => {
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.connect(g); g.connect(audioCtx.destination);
+        o.frequency.setValueAtTime(freq, now + i * 0.1);
+        g.gain.setValueAtTime(0.25, now + i * 0.1);
+        g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+        o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.3);
+      });
+      break;
+    case 'hit':
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(150, now);
+      osc.frequency.exponentialRampToValueAtTime(50, now + 0.1);
+      gain.gain.setValueAtTime(0.2, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+      osc.start(now); osc.stop(now + 0.1);
+      break;
+  }
 }
 
 // ============================================================
@@ -639,38 +791,44 @@ function showText(x, y, text, color) {
 // ============================================================
 function draw() {
   if (!ctx) return;
+  
   const config = LEVELS[game.level - 1] || LEVELS[0];
-  
+
   ctx.save();
+
+  // Screen shake
   if (game.shakeAmount > 0) {
-    ctx.translate((Math.random()-0.5)*game.shakeAmount, (Math.random()-0.5)*game.shakeAmount);
+    const sx = (Math.random() - 0.5) * game.shakeAmount;
+    const sy = (Math.random() - 0.5) * game.shakeAmount;
+    ctx.translate(sx, sy);
   }
-  
-  // Background
+
+  // Background gradient
   const grad = ctx.createLinearGradient(0, 0, 0, H);
   grad.addColorStop(0, config.bgColor1);
   grad.addColorStop(1, config.bgColor2);
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, W, H);
-  
-  // Clouds
-  drawClouds();
-  
+
+  // Only draw game objects if game has been initialized
   if (game.state === 'playing' || game.state === 'levelComplete' || game.state === 'gameOver') {
-    // Draw obstacles
-    game.obstacles.forEach(obs => drawObstacle(obs));
-    
+    // Background decorations (clouds, grass)
+    drawBackground(config);
+
+    // Draw planks
+    game.obstacles.forEach(obs => drawPlank(obs));
+
     // Draw hens
     game.hens.forEach(hen => drawHen(hen));
-    
+
     // Draw eggs
     game.eggs.forEach(egg => drawEgg(egg));
-    
+
     // Draw basket
     if (game.basket) drawBasket(game.basket);
   }
-  
-  // Particles
+
+  // Draw particles (always)
   game.particles.forEach(p => {
     ctx.globalAlpha = p.life;
     ctx.fillStyle = p.color;
@@ -679,151 +837,173 @@ function draw() {
     ctx.fill();
   });
   ctx.globalAlpha = 1;
-  
+
   // Floating texts
   floatingTexts.forEach(ft => {
     ft.y -= 1.5;
     ft.life -= 0.02;
-    ctx.globalAlpha = Math.max(0, ft.life);
+    ctx.globalAlpha = ft.life;
     ctx.fillStyle = ft.color;
-    ctx.font = `bold ${16 * SCALE}px system-ui, sans-serif`;
+    ctx.font = `bold ${16 * SCALE}px Comic Sans MS`;
     ctx.textAlign = 'center';
     ctx.fillText(ft.text, ft.x, ft.y);
   });
   ctx.globalAlpha = 1;
   floatingTexts = floatingTexts.filter(ft => ft.life > 0);
-  
-  // Combo
+
+  // Combo display
   if (game.combo > 1) {
     ctx.fillStyle = '#FFD700';
-    ctx.font = `bold ${20 * SCALE}px system-ui, sans-serif`;
+    ctx.font = `bold ${20 * SCALE}px Comic Sans MS`;
     ctx.textAlign = 'center';
-    ctx.globalAlpha = Math.min(1, game.comboTimer / 0.5);
-    ctx.fillText(`COMBO x${game.combo}!`, W / 2, H / 2);
+    ctx.globalAlpha = game.comboTimer / 2;
+    ctx.fillText(`COMBO x${game.combo}!`, W / 2, H / 2 - 50 * SCALE);
     ctx.globalAlpha = 1;
   }
-  
-  // Flash
+
+  // Flash overlay
   if (game.flashTimer > 0) {
     ctx.fillStyle = game.flashColor;
-    ctx.globalAlpha = game.flashTimer * 2;
+    ctx.globalAlpha = game.flashTimer;
     ctx.fillRect(0, 0, W, H);
     ctx.globalAlpha = 1;
   }
-  
+
   ctx.restore();
 }
 
-function drawClouds() {
+// ============================================================
+// DRAW BACKGROUND
+// ============================================================
+function drawBackground(config) {
+  // Clouds
   ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  const time = performance.now() / 8000;
-  for (let i = 0; i < 4; i++) {
-    const cx = ((i * 150 + time * 25 * (i % 2 + 1)) % (W + 100)) - 50;
-    const cy = 30 + i * 18;
-    const sz = 25 + i * 4;
+  const time = performance.now() / 5000;
+  for (let i = 0; i < 5; i++) {
+    const cx = ((i * 120 + time * 30 * (i % 2 + 1)) % (W + 100)) - 50;
+    const cy = 30 + i * 25;
+    drawCloud(cx, cy, 30 + i * 5);
+  }
+
+  // Ground
+  ctx.fillStyle = '#7CB342';
+  ctx.fillRect(0, H - 30 * SCALE, W, 30 * SCALE);
+  ctx.fillStyle = '#558B2F';
+  for (let i = 0; i < W; i += 20) {
     ctx.beginPath();
-    ctx.arc(cx, cy, sz * 0.5, 0, Math.PI * 2);
-    ctx.arc(cx + sz * 0.35, cy - sz * 0.1, sz * 0.4, 0, Math.PI * 2);
-    ctx.arc(cx + sz * 0.7, cy, sz * 0.3, 0, Math.PI * 2);
+    ctx.moveTo(i, H - 30 * SCALE);
+    ctx.lineTo(i + 5, H - 40 * SCALE);
+    ctx.lineTo(i + 10, H - 30 * SCALE);
     ctx.fill();
   }
 }
 
+function drawCloud(x, y, size) {
+  ctx.beginPath();
+  ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.4, y - size * 0.1, size * 0.4, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.8, y, size * 0.35, 0, Math.PI * 2);
+  ctx.arc(x + size * 0.4, y + size * 0.1, size * 0.3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// ============================================================
+// DRAW HEN
+// ============================================================
 function drawHen(hen) {
-  const bob = Math.sin(hen.animTimer * 3) * 2 * SCALE;
+  const x = hen.x;
+  const y = hen.y;
+  const s = hen.width / 45;
+  const bob = Math.sin(hen.animTimer * 3) * 3 * s;
+
   ctx.save();
-  ctx.translate(hen.x, hen.baseY + bob);
-  
-  // Draw hen using Canvas API (no image dependency)
-  // Body
-  ctx.fillStyle = '#FFF8E1';
-  ctx.strokeStyle = '#FFB74D';
-  ctx.lineWidth = 2 * SCALE;
-  ctx.beginPath();
-  ctx.ellipse(0, 5 * SCALE, 20 * SCALE, 18 * SCALE, 0, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
-  
-  // Wing
-  ctx.fillStyle = '#FFE0B2';
-  ctx.beginPath();
-  ctx.ellipse(-12 * SCALE, 8 * SCALE, 10 * SCALE, 8 * SCALE, -0.3, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Head
-  ctx.fillStyle = '#FFF8E1';
-  ctx.strokeStyle = '#FFB74D';
-  ctx.beginPath();
-  ctx.arc(14 * SCALE, -12 * SCALE, 12 * SCALE, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
-  
-  // Comb
-  ctx.fillStyle = '#F44336';
-  ctx.beginPath();
-  ctx.moveTo(9 * SCALE, -22 * SCALE);
-  ctx.lineTo(12 * SCALE, -28 * SCALE);
-  ctx.lineTo(15 * SCALE, -22 * SCALE);
-  ctx.lineTo(18 * SCALE, -28 * SCALE);
-  ctx.lineTo(21 * SCALE, -22 * SCALE);
-  ctx.closePath();
-  ctx.fill();
-  
-  // Eye
-  ctx.fillStyle = '#333';
-  ctx.beginPath();
-  ctx.arc(18 * SCALE, -13 * SCALE, 2.5 * SCALE, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'white';
-  ctx.beginPath();
-  ctx.arc(18.5 * SCALE, -14 * SCALE, 1 * SCALE, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Beak
-  ctx.fillStyle = '#FF8F00';
-  ctx.beginPath();
-  ctx.moveTo(24 * SCALE, -11 * SCALE);
-  ctx.lineTo(30 * SCALE, -9 * SCALE);
-  ctx.lineTo(24 * SCALE, -7 * SCALE);
-  ctx.closePath();
-  ctx.fill();
-  
-  // Blush
-  ctx.fillStyle = 'rgba(255,150,150,0.5)';
-  ctx.beginPath();
-  ctx.ellipse(20 * SCALE, -7 * SCALE, 4 * SCALE, 2.5 * SCALE, 0, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Feet
-  ctx.fillStyle = '#FF8F00';
-  ctx.fillRect(-6 * SCALE, 20 * SCALE, 5 * SCALE, 6 * SCALE);
-  ctx.fillRect(4 * SCALE, 20 * SCALE, 5 * SCALE, 6 * SCALE);
-  
-  // Egg indicator (small egg being laid)
-  if (Math.sin(hen.animTimer * 5) > 0.8) {
-    ctx.fillStyle = '#FFFDE7';
-    ctx.strokeStyle = '#FFE082';
-    ctx.lineWidth = 1;
+  ctx.translate(x, y + bob);
+
+  // Try to use image asset
+  if (assets.hen) {
+    const hw = hen.width * 1.2;
+    const hh = hen.height * 1.2;
+    ctx.drawImage(assets.hen, -hw/2, -hh/2, hw, hh);
+  } else {
+    // Fallback: drawn hen
+    ctx.fillStyle = '#FFF8E1';
     ctx.beginPath();
-    ctx.ellipse(0, 25 * SCALE, 4 * SCALE, 5 * SCALE, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    ctx.ellipse(0, 0, 22 * s, 20 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#FFB74D';
+    ctx.lineWidth = 2 * s;
+    ctx.stroke();
+
+    ctx.fillStyle = '#FFE0B2';
+    ctx.beginPath();
+    ctx.ellipse(-10 * s, 5 * s, 12 * s, 10 * s, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#FFF8E1';
+    ctx.beginPath();
+    ctx.arc(15 * s, -15 * s, 14 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#FFB74D';
+    ctx.stroke();
+
+    ctx.fillStyle = '#F44336';
+    ctx.beginPath();
+    ctx.moveTo(10 * s, -26 * s);
+    ctx.lineTo(13 * s, -33 * s);
+    ctx.lineTo(16 * s, -26 * s);
+    ctx.lineTo(19 * s, -33 * s);
+    ctx.lineTo(22 * s, -26 * s);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(20 * s, -16 * s, 3 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(21 * s, -17 * s, 1.2 * s, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#FF8F00';
+    ctx.beginPath();
+    ctx.moveTo(27 * s, -14 * s);
+    ctx.lineTo(35 * s, -12 * s);
+    ctx.lineTo(27 * s, -10 * s);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = 'rgba(255,150,150,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(22 * s, -10 * s, 4 * s, 3 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#FF8F00';
+    ctx.fillRect(-8 * s, 18 * s, 6 * s, 8 * s);
+    ctx.fillRect(4 * s, 18 * s, 6 * s, 8 * s);
   }
-  
+
   ctx.restore();
 }
 
+// ============================================================
+// DRAW EGG
+// ============================================================
 function drawEgg(egg) {
   ctx.save();
   ctx.translate(egg.x, egg.y);
   ctx.rotate(egg.rotation);
-  
+
   const w = egg.width;
   const h = egg.height;
-  
+
   // Shadow
   ctx.fillStyle = 'rgba(0,0,0,0.1)';
   ctx.beginPath();
-  ctx.ellipse(2 * SCALE, h / 2 + 3 * SCALE, w / 2, h / 6, 0, 0, Math.PI * 2);
+  ctx.ellipse(2, h / 2 + 3, w / 2, h / 6, 0, 0, Math.PI * 2);
   ctx.fill();
-  
+
+  // Egg body colors by type
   const colors = {
     normal: { body: '#FFFDE7', spot: '#FFE082' },
     black: { body: '#37474F', spot: '#546E7A' },
@@ -838,344 +1018,262 @@ function drawEgg(egg) {
     multi: { body: '#E040FB', spot: '#EA80FC' },
     rainbow: { body: '#FFFFFF', spot: '#FF69B4' },
   };
-  
+
   const c = colors[egg.type] || colors.normal;
-  
+
+  // Egg body
   ctx.fillStyle = c.body;
-  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
-  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-  ctx.fill(); ctx.stroke();
-  
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Spots
   ctx.fillStyle = c.spot;
   ctx.beginPath();
-  ctx.arc(-w * 0.15, -h * 0.1, w * 0.1, 0, Math.PI * 2);
+  ctx.arc(-w * 0.15, -h * 0.1, w * 0.12, 0, Math.PI * 2);
   ctx.fill();
-  
+  ctx.beginPath();
+  ctx.arc(w * 0.15, h * 0.15, w * 0.08, 0, Math.PI * 2);
+  ctx.fill();
+
   // Glow for special eggs
   if (egg.type !== 'normal' && egg.type !== 'black') {
     ctx.shadowColor = c.body;
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = c.body; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = c.body;
+    ctx.lineWidth = 2;
     ctx.stroke();
     ctx.shadowBlur = 0;
   }
-  
+
+  // Rainbow effect
   if (egg.type === 'rainbow') {
-    const hue = (performance.now() / 8) % 360;
+    const hue = (performance.now() / 10) % 360;
     ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 3;
     ctx.beginPath();
     ctx.ellipse(0, 0, w / 2 + 2, h / 2 + 2, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  
+
+  // Black egg skull icon
+  if (egg.type === 'black') {
+    ctx.fillStyle = '#FFF';
+    ctx.font = `${12 * SCALE}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('💀', 0, 0);
+  }
+
   ctx.restore();
 }
 
-function drawObstacle(obs) {
+// ============================================================
+// DRAW OBSTACLE
+// ============================================================
+function drawPlank(p) {
   ctx.save();
-  ctx.translate(obs.x, obs.y);
-  ctx.rotate(obs.angle || 0);
+  ctx.translate(p.x, p.y);
+  ctx.rotate(p.angle || 0);
   
-  const w = obs.width;
-  const h = obs.height;
+  const w = p.width;
+  const h = p.height;
   
-  switch (obs.type) {
-    case 'wood':
-      // Wooden plank
-      ctx.fillStyle = '#8D6E63';
-      ctx.strokeStyle = '#5D4037';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.roundRect(-w/2, -h/2, w, h, 4 * SCALE);
-      ctx.fill(); ctx.stroke();
-      
-      // Wood grain lines
-      ctx.strokeStyle = '#6D4C41';
-      ctx.lineWidth = 1;
-      for (let i = -w/2 + 8; i < w/2 - 8; i += 12 * SCALE) {
-        ctx.beginPath();
-        ctx.moveTo(i, -h/2 + 2);
-        ctx.lineTo(i, h/2 - 2);
-        ctx.stroke();
-      }
-      
-      // Nails
-      ctx.fillStyle = '#5D4037';
-      ctx.beginPath();
-      ctx.arc(-w/2 + 6 * SCALE, -h/2 + 3 * SCALE, 2 * SCALE, 0, Math.PI * 2);
-      ctx.arc(w/2 - 6 * SCALE, -h/2 + 3 * SCALE, 2 * SCALE, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-      
-    case 'rock':
-      ctx.fillStyle = '#78909C';
-      ctx.beginPath();
-      ctx.ellipse(0, 0, w/2, h/2, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#90A4AE';
-      ctx.beginPath();
-      ctx.ellipse(-w * 0.1, -h * 0.1, w * 0.3, h * 0.25, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#546E7A';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, w/2, h/2, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      break;
-      
-    case 'bush':
-      ctx.fillStyle = '#388E3C';
-      ctx.beginPath();
-      ctx.arc(-w * 0.2, 0, w * 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(w * 0.2, 0, w * 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(0, -h * 0.2, w * 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#4CAF50';
-      ctx.beginPath();
-      ctx.arc(-w * 0.1, -h * 0.1, w * 0.12, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-      
-    case 'corn':
-      ctx.fillStyle = '#7CB342';
-      ctx.fillRect(-4 * SCALE, -h/2, 8 * SCALE, h);
-      ctx.fillStyle = '#FDD835';
-      ctx.beginPath();
-      ctx.ellipse(0, -h * 0.1, 10 * SCALE, 15 * SCALE, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#F9A825';
-      for (let i = 0; i < 4; i++) {
-        ctx.beginPath();
-        ctx.arc((i - 1.5) * 4 * SCALE, -h * 0.1 + (i % 2) * 6 * SCALE, 2.5 * SCALE, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      break;
-      
-    case 'wind':
-      const wAlpha = 0.15 + Math.sin(performance.now() / 400) * 0.1;
-      ctx.fillStyle = `rgba(200,230,255,${wAlpha})`;
-      ctx.fillRect(-w/2, -h/2, w, h);
-      ctx.strokeStyle = `rgba(100,180,255,0.6)`;
-      ctx.lineWidth = 2;
-      for (let i = 0; i < 3; i++) {
-        const wy = (i - 1) * h * 0.3;
-        const wx = Math.sin(performance.now() / 300 + i) * 8;
-        ctx.beginPath();
-        ctx.moveTo(-w/2 + wx, wy);
-        ctx.lineTo(w/2 + wx, wy);
-        ctx.stroke();
-      }
-      break;
-      
-    case 'rain':
-      const rAlpha = 0.15 + Math.sin(performance.now() / 400) * 0.1;
-      ctx.fillStyle = `rgba(100,150,255,${rAlpha})`;
-      ctx.fillRect(-w/2, -h/2, w, h);
-      ctx.strokeStyle = `rgba(150,200,255,0.7)`;
-      ctx.lineWidth = 1;
-      for (let i = 0; i < 5; i++) {
-        const rx = (i / 5) * w - w/2;
-        const ry = ((performance.now() / 10 + i * 20) % h) - h/2;
-        ctx.beginPath();
-        ctx.moveTo(rx, ry);
-        ctx.lineTo(rx - 2, ry + 8);
-        ctx.stroke();
-      }
-      break;
-      
-    case 'fox':
-      ctx.fillStyle = '#FF5722';
-      ctx.beginPath();
-      ctx.ellipse(0, 4 * SCALE, 16 * SCALE, 12 * SCALE, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(14 * SCALE, -4 * SCALE, 10 * SCALE, 0, Math.PI * 2);
-      ctx.fill();
-      // Ears
-      ctx.beginPath();
-      ctx.moveTo(7 * SCALE, -12 * SCALE);
-      ctx.lineTo(10 * SCALE, -20 * SCALE);
-      ctx.lineTo(15 * SCALE, -12 * SCALE);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(17 * SCALE, -12 * SCALE);
-      ctx.lineTo(20 * SCALE, -20 * SCALE);
-      ctx.lineTo(25 * SCALE, -12 * SCALE);
-      ctx.fill();
-      // Eye
-      ctx.fillStyle = '#333';
-      ctx.beginPath();
-      ctx.arc(17 * SCALE, -5 * SCALE, 2 * SCALE, 0, Math.PI * 2);
-      ctx.fill();
-      // Tail
-      ctx.fillStyle = '#FFAB91';
-      ctx.beginPath();
-      ctx.ellipse(-15 * SCALE, 0, 8 * SCALE, 5 * SCALE, 0.3, 0, Math.PI * 2);
-      ctx.fill();
-      break;
-      
-    case 'dragon':
-      ctx.fillStyle = '#E53935';
-      ctx.beginPath();
-      ctx.ellipse(0, 4 * SCALE, 22 * SCALE, 16 * SCALE, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(18 * SCALE, -4 * SCALE, 12 * SCALE, 0, Math.PI * 2);
-      ctx.fill();
-      // Wings
-      ctx.fillStyle = '#EF5350';
-      ctx.beginPath();
-      ctx.moveTo(-4 * SCALE, -4 * SCALE);
-      ctx.lineTo(-18 * SCALE, -22 * SCALE);
-      ctx.lineTo(4 * SCALE, -8 * SCALE);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(4 * SCALE, -4 * SCALE);
-      ctx.lineTo(18 * SCALE, -22 * SCALE);
-      ctx.lineTo(-4 * SCALE, -8 * SCALE);
-      ctx.fill();
-      // Eye
-      ctx.fillStyle = '#FFEB3B';
-      ctx.beginPath();
-      ctx.arc(22 * SCALE, -6 * SCALE, 2.5 * SCALE, 0, Math.PI * 2);
-      ctx.fill();
-      break;
+  // Wooden plank body
+  ctx.fillStyle = '#8B5A2B';
+  ctx.strokeStyle = '#5D3A1A';
+  ctx.lineWidth = 2 * SCALE;
+  
+  // Rounded rectangle
+  const r = 4 * SCALE;
+  ctx.beginPath();
+  ctx.moveTo(-w/2 + r, -h/2);
+  ctx.lineTo(w/2 - r, -h/2);
+  ctx.quadraticCurveTo(w/2, -h/2, w/2, -h/2 + r);
+  ctx.lineTo(w/2, h/2 - r);
+  ctx.quadraticCurveTo(w/2, h/2, w/2 - r, h/2);
+  ctx.lineTo(-w/2 + r, h/2);
+  ctx.quadraticCurveTo(-w/2, h/2, -w/2, h/2 - r);
+  ctx.lineTo(-w/2, -h/2 + r);
+  ctx.quadraticCurveTo(-w/2, -h/2, -w/2 + r, -h/2);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  
+  // Wood grain lines
+  ctx.strokeStyle = '#A0722B';
+  ctx.lineWidth = 1;
+  for (let i = 0; i < 5; i++) {
+    const xPos = -w/2 + (i+1) * w/6;
+    ctx.beginPath();
+    ctx.moveTo(xPos, -h/2 + 2);
+    ctx.lineTo(xPos, h/2 - 2);
+    ctx.stroke();
   }
   
+  // Top highlight
+  ctx.fillStyle = 'rgba(255,200,150,0.3)';
+  ctx.fillRect(-w/2 + 3, -h/2 + 1, w - 6, 3 * SCALE);
+  
+  // Bottom shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(-w/2 + 3, h/2 - 4 * SCALE, w - 6, 3 * SCALE);
+  
   ctx.restore();
 }
 
+// ============================================================
+// DRAW BASKET
+// ============================================================
 function drawBasket(basket) {
   ctx.save();
   ctx.translate(basket.x, basket.y);
-  
+
   const w = basket.width;
   const h = basket.height;
-  
+
   // Shield glow
   if (basket.shield) {
     ctx.strokeStyle = '#4FC3F7';
- ctx.lineWidth = 3 * SCALE;
+    ctx.lineWidth = 3 * SCALE;
     ctx.globalAlpha = 0.5 + Math.sin(performance.now() / 200) * 0.3;
     ctx.beginPath();
-    ctx.ellipse(0, 0, w/2 + 6 * SCALE, h/2 + 6 * SCALE, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, w / 2 + 8 * SCALE, h / 2 + 8 * SCALE, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
-  
-  // Magnet field
+
+  // Magnet indicator
   if (basket.magnet) {
-    ctx.strokeStyle = '#E91E63'; ctx.lineWidth = 2 * SCALE;
-    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = '#E91E63';
+    ctx.lineWidth = 2 * SCALE;
+    ctx.setLineDash([5, 5]);
     ctx.beginPath();
-    ctx.ellipse(0, 0, w/2 + 12 * SCALE, h/2 + 12 * SCALE, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, w / 2 + 15 * SCALE, h / 2 + 15 * SCALE, 0, 0, Math.PI * 2);
     ctx.stroke();
     ctx.setLineDash([]);
   }
-  
-  // Basket body
-  ctx.fillStyle = '#8D6E63';
-  ctx.beginPath();
-  ctx.moveTo(-w/2, -h/4);
-  ctx.lineTo(-w/2 - 3 * SCALE, h/2);
-  ctx.lineTo(w/2 + 3 * SCALE, h/2);
-  ctx.lineTo(w/2, -h/4);
-  ctx.closePath();
-  ctx.fill();
-  
-  // Weave
-  ctx.strokeStyle = '#6D4C41';
-  ctx.lineWidth = 1.5 * SCALE;
-  for (let i = -3; i <= 3; i++) {
+
+  // Try to use image asset
+  if (assets.basket) {
+    const bw = w * 1.3;
+    const bh = h * 1.5;
+    ctx.drawImage(assets.basket, -bw/2, -bh/2, bw, bh);
+  } else {
+    // Fallback: drawn basket
+    ctx.fillStyle = '#8D6E63';
     ctx.beginPath();
-    ctx.moveTo(-w/2 + i * w/7, -h/4);
-    ctx.lineTo(-w/2 - 3 * SCALE + i * w/7, h/2);
-    ctx.stroke();
-  }
-  for (let i = 0; i < 3; i++) {
-    const yy = -h/4 + i * h/3;
+    ctx.moveTo(-w / 2, -h / 4);
+    ctx.lineTo(-w / 2 - 3 * SCALE, h / 2);
+    ctx.lineTo(w / 2 + 3 * SCALE, h / 2);
+    ctx.lineTo(w / 2, -h / 4);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = '#6D4C41';
+    ctx.lineWidth = 1.5 * SCALE;
+    for (let i = -3; i <= 3; i++) {
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + i * w / 7, -h / 4);
+      ctx.lineTo(-w / 2 - 3 * SCALE + i * w / 7, h / 2);
+      ctx.stroke();
+    }
+    for (let i = 0; i < 3; i++) {
+      const yy = -h / 4 + i * h / 3;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2, yy);
+      ctx.lineTo(w / 2, yy);
+      ctx.stroke();
+    }
+
+    ctx.fillStyle = '#A1887F';
     ctx.beginPath();
-    ctx.moveTo(-w/2, yy);
-    ctx.lineTo(w/2, yy);
-    ctx.stroke();
+    ctx.ellipse(0, -h / 4, w / 2 + 3 * SCALE, 5 * SCALE, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
-  
-  // Rim
-  ctx.fillStyle = '#A1887F';
-  ctx.beginPath();
-  ctx.ellipse(0, -h/4, w/2 + 3 * SCALE, 4 * SCALE, 0, 0, Math.PI * 2);
-  ctx.fill();
-  
-  // Double points
+
+  // Double points indicator
   if (basket.doublePoints) {
     ctx.fillStyle = '#FF9800';
-    ctx.font = `bold ${10 * SCALE}px system-ui`;
+    ctx.font = `bold ${10 * SCALE}px Comic Sans MS`;
     ctx.textAlign = 'center';
-    ctx.fillText('2X', 0, h/2 + 12 * SCALE);
+    ctx.fillText('2X', 0, h / 2 + 12 * SCALE);
   }
-  
+
   // Rainbow aura
   if (basket.rainbow) {
     const hue = (performance.now() / 5) % 360;
     ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
-    ctx.lineWidth = 3 * SCALE;
+    ctx.lineWidth = 4 * SCALE;
     ctx.beginPath();
-    ctx.ellipse(0, 0, w/2 + 4 * SCALE, h/2 + 4 * SCALE, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, w / 2 + 5 * SCALE, h / 2 + 5 * SCALE, 0, 0, Math.PI * 2);
     ctx.stroke();
   }
-  
+
   ctx.restore();
 }
 
 // ============================================================
 // UI
 // ============================================================
+let muted = false;
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('muteBtn').textContent = muted ? '🔇' : '🔊';
+}
+
 function updateUI() {
   const livesStr = '❤️'.repeat(game.lives) + '🖤'.repeat(Math.max(0, 7 - game.lives));
   const pct = Math.max(0, (game.timeLeft / game.levelTime) * 100);
-  const config = LEVELS[game.level - 1];
   ui.innerHTML = `
     <div style="position:relative;">
       <div class="lives">${livesStr}</div>
-      <div class="level">L${game.level}: ${config.name}</div>
-      <div class="timer-bar"><div class="timer-fill" style="width:${pct}%"></div></div>
+      <div class="level">Level ${game.level}: ${LEVELS[game.level - 1].name}</div>
+      <div class="timer-bar"><div class="timer-fill" style="width: ${pct}%"></div></div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px;">
-      <div class="score">⭐${game.score}</div>
-      <button onclick="toggleMute()" style="background:none;border:none;font-size:18px;cursor:pointer;">${game.muted ? '🔇' : '🔊'}</button>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="score">⭐ ${game.score}</div>
+      <button id="muteBtn" onclick="toggleMute()" style="background:none;border:none;font-size:20px;cursor:pointer;">🔊</button>
     </div>
   `;
-}
-
-function toggleMute() {
-  game.muted = !game.muted;
-  updateUI();
 }
 
 // ============================================================
 // SCREENS
 // ============================================================
 function showStartScreen() {
-  game.state = 'start';
   startScreen.classList.remove('hidden');
+  game.state = 'start';
   startScreen.innerHTML = `
     <h1>🐔 Hen Lay Egg 🥚</h1>
-    <p>Eggs fall from hens, bounce off wooden planks!</p>
+    <p>Catch eggs falling from hens!</p>
     <p>🟡 Golden = Bonus | 💀 Black = Danger</p>
     <p>🌈 Special eggs give superpowers!</p>
+    <p>Survive 60 seconds per level, 10 levels total!</p>
     <button class="btn" onclick="showLevelSelect()">🎮 PLAY</button>
-    <p style="font-size:13px;margin-top:12px;opacity:0.6;">
-      Desktop: ← → keys | Mobile: touch buttons
+    <p style="font-size:13px; margin-top:12px; opacity:0.6;">
+      Desktop: ← → Arrow keys<br>
+      Mobile: Touch buttons
     </p>
+    <p style="font-size:12px; margin-top:10px; opacity:0.5;">
+      🛡️ Shield blocks 1 black egg | 🧲 Magnet attracts eggs<br>
+      ⚡ Speed boost | 📦 Big basket | ⏱️ Slow-mo | ✨ Double points
+    </p>
+  `;
+}
+
+function showGameOver() {
+  gameOverScreen.classList.remove('hidden');
+  gameOverScreen.innerHTML = `
+    <h2>💔 Game Over!</h2>
+    <p style="font-size:24px; margin:10px 0;">Score: ⭐ ${game.score}</p>
+    <p style="font-size:18px;">Reached Level ${game.level}</p>
+    <button class="btn" onclick="restartGame()">🔄 TRY AGAIN</button>
   `;
 }
 
@@ -1188,26 +1286,27 @@ function showLevelSelect() {
   LEVELS.forEach((lvl, i) => {
     const num = i + 1;
     const unlocked = num <= game.unlockedLevels;
-    const stars = game.highScores[num] ? '⭐'.repeat(Math.min(3, Math.floor(game.highScores[num] / 200) + 1)) : '';
+    const stars = game.highScores[num] ? '⭐'.repeat(Math.min(3, Math.floor(game.highScores[num]/200)+1)) : '';
     gridHTML += `
       <div class="level-card ${unlocked ? 'unlocked' : 'locked'}" 
            onclick="${unlocked ? `selectLevel(${num})` : ''}">
         <div class="level-num">${unlocked ? num : '🔒'}</div>
         <div class="level-name">${lvl.name}</div>
         <div class="level-stars">${stars}</div>
+        <div class="level-desc">${lvl.planks} planks</div>
       </div>
     `;
   });
   
-  levelScreen.innerHTML = `
-    <h2>Select Level</h2>
+  levelScreen.innerHTML = `<h2>Select Level</h2>
     <div class="level-grid">${gridHTML}</div>
-    <button class="btn" onclick="showStartScreen()" style="margin-top:15px;padding:10px 30px;font-size:18px;">← Back</button>
-  `;
+    <button class="btn" onclick="showStartScreen()" style="margin-top:12px;padding:10px 25px;font-size:16px;">← Back</button>`;
 }
 
 function selectLevel(num) {
   game.level = num;
+  game.lives = 7;
+  game.score = 0;
   levelScreen.classList.add('hidden');
   initLevel(num);
   game.state = 'playing';
@@ -1218,43 +1317,30 @@ function showLevelComplete() {
   game.state = 'levelComplete';
   levelScreen.classList.remove('hidden');
   
-  // Save high score
   if (!game.highScores[game.level] || game.score > game.highScores[game.level]) {
     game.highScores[game.level] = game.score;
   }
-  
-  // Unlock next level
   if (game.level >= game.unlockedLevels && game.level < 10) {
     game.unlockedLevels = game.level + 1;
   }
   
-  const nextConfig = LEVELS[game.level] || null;
   const hasNext = game.level < 10;
+  const nextConfig = LEVELS[game.level] || null;
   
-  levelScreen.innerHTML = `
-    <h2>🎉 Level ${game.level} Complete!</h2>
-    <p style="font-size:22px;margin:8px 0;">Score: ⭐${game.score}</p>
+  levelScreen.innerHTML = `<h2>🎉 Level ${game.level} Complete!</h2>
+    <p style="font-size:22px;margin:6px 0;">Score: ⭐${game.score}</p>
     <p style="color:#90EE90;">Lives: ${'❤️'.repeat(game.lives)}</p>
-    ${hasNext ? `<p style="font-size:13px;color:#FFD700;margin-top:8px;">Next: ${nextConfig.name}<br>${nextConfig.desc}</p>` : '<p style="font-size:18px;color:#FFD700;margin-top:8px;">🏆 ALL LEVELS COMPLETE! 🏆</p>'}
-    <button class="btn" onclick="nextLevel()" style="margin-top:12px;">
-      ${hasNext ? '➡️ NEXT LEVEL' : '🏆 FINISH'}
-    </button>
-    <button class="btn" onclick="showLevelSelect()" style="margin-top:8px;padding:10px 30px;font-size:18px;">📋 Level Select</button>
-  `;
+    ${hasNext ? `<p style="font-size:13px;color:#FFD700;margin-top:6px;">Next: ${nextConfig.name}</p>` : '<p style="font-size:18px;color:#FFD700;margin-top:6px;">🏆 ALL LEVELS COMPLETE! 🏆</p>'}
+    <button class="btn" onclick="nextLevel()" style="margin-top:10px;">${hasNext?'➡️ NEXT LEVEL':'🏆 FINISH'}</button>
+    <button class="btn" onclick="showLevelSelect()" style="margin-top:6px;padding:10px 25px;font-size:16px;">📋 Levels</button>`;
 }
 
 function nextLevel() {
   levelScreen.classList.add('hidden');
   if (game.level >= 10) {
     gameOverScreen.classList.remove('hidden');
-    gameOverScreen.innerHTML = `
-      <h2 style="color:#FFD700;">🏆 YOU WIN! 🏆</h2>
-      <p style="font-size:22px;">Final Score: ⭐${game.score}</p>
-      <p style="color:#90EE90;">Lives: ${'❤️'.repeat(game.lives)}</p>
-      <button class="btn" onclick="showStartScreen()">🔄 PLAY AGAIN</button>
-    `;
-    game.state = 'gameOver';
-    return;
+    gameOverScreen.innerHTML = `<h2 style="color:#FFD700;">🏆 YOU WIN! 🏆</h2><p style="font-size:22px;">Final Score: ⭐${game.score}</p><p style="color:#90EE90;">Lives: ${'❤️'.repeat(game.lives)}</p><button class="btn" onclick="showStartScreen()">🔄 PLAY AGAIN</button>`;
+    game.state = 'gameOver'; return;
   }
   game.level++;
   if (game.lives < 7 && game.level % 2 === 0) game.lives++;
@@ -1265,79 +1351,17 @@ function nextLevel() {
 
 function showGameOver() {
   gameOverScreen.classList.remove('hidden');
-  gameOverScreen.innerHTML = `
-    <h2>💔 Game Over!</h2>
-    <p style="font-size:22px;">Score: ⭐${game.score}</p>
-    <p>Level: ${game.level}</p>
+  gameOverScreen.innerHTML = `<h2>💔 Game Over!</h2><p style="font-size:22px;">Score: ⭐${game.score}</p><p>Level: ${game.level}</p>
     <button class="btn" onclick="retryLevel()">🔄 RETRY</button>
-    <button class="btn" onclick="showLevelSelect()" style="margin-top:8px;padding:10px 30px;font-size:18px;">📋 Levels</button>
-  `;
+    <button class="btn" onclick="showLevelSelect()" style="margin-top:6px;padding:10px 25px;font-size:16px;">📋 Levels</button>`;
 }
 
 function retryLevel() {
   gameOverScreen.classList.add('hidden');
-  game.lives = 7;
-  game.score = 0;
+  game.lives = 7; game.score = 0;
   initLevel(game.level);
   game.state = 'playing';
   updateUI();
-}
-
-// ============================================================
-// AUDIO
-// ============================================================
-let audioCtx = null;
-function initAudio() {
-  if (audioCtx) return;
-  try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
-}
-
-function playSound(type) {
-  if (game.muted || !audioCtx) return;
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.connect(gain); gain.connect(audioCtx.destination);
-  const now = audioCtx.currentTime;
-  
-  switch(type) {
-    case 'catch':
-      osc.frequency.setValueAtTime(523, now);
-      osc.frequency.setValueAtTime(659, now + 0.08);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-      osc.start(now); osc.stop(now + 0.15); break;
-    case 'golden':
-      [523, 659, 784, 1047].forEach((f, i) => {
-        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-        o.connect(g); g.connect(audioCtx.destination);
-        o.frequency.setValueAtTime(f, now + i * 0.07);
-        g.gain.setValueAtTime(0.2, now + i * 0.07);
-        g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.07 + 0.2);
-        o.start(now + i * 0.07); o.stop(now + i * 0.07 + 0.2);
-      }); break;
-    case 'bad':
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(200, now);
-      osc.frequency.exponentialRampToValueAtTime(80, now + 0.25);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-      osc.start(now); osc.stop(now + 0.25); break;
-    case 'powerup':
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.setValueAtTime(554, now + 0.05);
-      osc.frequency.setValueAtTime(659, now + 0.1);
-      osc.frequency.setValueAtTime(880, now + 0.15);
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-      osc.start(now); osc.stop(now + 0.25); break;
-    case 'hit':
-      osc.type = 'square';
-      osc.frequency.setValueAtTime(150, now);
-      osc.frequency.exponentialRampToValueAtTime(50, now + 0.08);
-      gain.gain.setValueAtTime(0.15, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-      osc.start(now); osc.stop(now + 0.08); break;
-  }
 }
 
 // ============================================================
